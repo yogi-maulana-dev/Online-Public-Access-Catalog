@@ -28,7 +28,7 @@ class HomeController extends Controller
                 ->orderByDesc('is_featured')->latest('published_at')->limit(12)->get(),
             'categories' => Category::roots()->withCount('books')->orderBy('sort_order')->get(),
             'spotlightAuthors' => Author::withCount('publishedBooks')
-                ->having('published_books_count', '>', 0)
+                ->whereHas('publishedBooks')
                 ->orderByDesc('published_books_count')
                 ->limit(4)
                 ->get(),

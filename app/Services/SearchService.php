@@ -59,18 +59,36 @@ class SearchService
 
     private function applyFulltext(Builder $query, string $q): bool
     {
-        $query->selectRaw(
-            'books.*, MATCH(title, subtitle, abstract, description) AGAINST (? IN NATURAL LANGUAGE MODE) AS relevance',
-            [$q]
-        )->where(function (Builder $w) use ($q) {
-            $w->whereFullText(['title', 'subtitle', 'abstract', 'description'], $q)
-                ->orWhere('title', 'like', "%{$q}%")
+        // Native MySQL/MariaDB FULLTEXT (MATCH ... AGAINST) when available; otherwise
+        // (e.g. SQLite) fall back to a LIKE-based search so the catalog still works.
+        $driver = $query->getModel()->getConnection()->getDriverName();
+
+        if (in_array($driver, ['mysql', 'mariadb'], true)) {
+            $query->selectRaw(
+                'books.*, MATCH(title, subtitle, abstract, description) AGAINST (? IN NATURAL LANGUAGE MODE) AS relevance',
+                [$q]
+            )->where(function (Builder $w) use ($q) {
+                $w->whereFullText(['title', 'subtitle', 'abstract', 'description'], $q)
+                    ->orWhere('title', 'like', "%{$q}%")
+                    ->orWhere('isbn', 'like', "%{$q}%")
+                    ->orWhereHas('authors', fn (Builder $a) => $a->where('name', 'like', "%{$q}%"))
+                    ->orWhereHas('keywords', fn (Builder $k) => $k->where('name', 'like', "%{$q}%"));
+            })->orderByDesc('relevance');
+
+            return true;
+        }
+
+        $query->where(function (Builder $w) use ($q) {
+            $w->where('title', 'like', "%{$q}%")
+                ->orWhere('subtitle', 'like', "%{$q}%")
+                ->orWhere('abstract', 'like', "%{$q}%")
+                ->orWhere('description', 'like', "%{$q}%")
                 ->orWhere('isbn', 'like', "%{$q}%")
                 ->orWhereHas('authors', fn (Builder $a) => $a->where('name', 'like', "%{$q}%"))
                 ->orWhereHas('keywords', fn (Builder $k) => $k->where('name', 'like', "%{$q}%"));
-        })->orderByDesc('relevance');
+        });
 
-        return true;
+        return false; // no relevance column; caller orders by recency
     }
 
     private function applyFilters(Builder $query, array $params): void
